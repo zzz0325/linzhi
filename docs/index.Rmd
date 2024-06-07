@@ -1,29 +1,149 @@
 ---
-title: "index"
-output: html_document
+title: "lz-20240607"
+author: "linzhi"
 date: "2024-06-07"
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+library(ggplot2)
+library(cowplot)
+library(deSolve)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+##################################################
+# 1. 颜色设定----
+```{r}
+cbb <- c("#000000", "#E69F00", "#56B4E9", "#009E73", 
+         "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# 2. 水样
+# 2.1 水样浓度设定
+```{r}
+d_Cw <- data.frame(t=c(0, 2, 2.01, 14),
+                   Cd113=c(2.4, 2.4, 0, 0),
+                   Cd114=c(2.5,2.5,2.5,2.5))
+```
+
+##################################################
+# 2.2 水样做图----
+```{r}
+p1 <- ggplot(d_Cw, aes(t))+
+  theme_bw()+
+  geom_line(aes(y=Cd113), color=cbb[1], size=0.9, alpha=0.8)+
+  geom_line(aes(y=Cd114), color=cbb[2], size=0.9, alpha=0.8)+
+  scale_x_continuous(breaks=c(0, 2, 14), labels=c("T0","T1","T2"))+
+  scale_y_continuous(breaks=seq(0, 2.5, length=5), labels=c("0","","","",""))+
+  labs(x="Time of exposure",
+       y="Cd in water")+
+  theme(axis.text.x = element_text(size=10, color="black"))+
+  theme(panel.grid = element_blank())+
+  annotate(geom="text", x=10, y=0.4, label=expression(""^113*"Cd"), size=4)+
+  annotate(geom="text", x=10, y=2.2, label=expression(""^114*"Cd"), size=4, color=cbb[2])+
+  theme(axis.title.x = element_blank())
+
+p1
+```
+
+##################################################
+# 3. 生物积累模拟----
+# 3.1 设定积分初始值
+```{r}
+parameters <- c(ku=0.1, ke=0.03)
+initial <- c(Cint_113=0, Cint_114=0)
+times <- seq(0, 14, 0.01)
+```
+
+# 3.2 水样浓度插值----
+```{r}
+Cw_113 <- approxfun(x = d_Cw[,1], 
+                    y = d_Cw[,2], 
+                    method = "linear", 
+                    rule = 2)
+
+plot(seq(0, 14, 0.01),Cw_113(seq(0, 14, 0.01)),type="l")
+
+
+Cw_114 <- approxfun(x = d_Cw[,1], 
+                    y = d_Cw[,3], 
+                    method = "linear", 
+                    rule = 2)
+
+plot(seq(0, 14, 0.01),Cw_114(seq(0, 14, 0.01)),type="l")
+```
+
+# 3.3 建立TK模型----
+```{r}
+TK <- function (t, y, parameters) {
+  ku=parameters[1]
+  ke=parameters[2]
+  Cint_113 <- y[1]
+  Cint_114 <- y[2]
+  dCint_113 <- ku * Cw_113(t) - ke * Cint_113
+  dCint_114 <- ku * Cw_114(t) - ke * Cint_114
+  
+  list(c(dCint_113, dCint_114))
+}
+```
+
+
+# 3.4 积分，模拟生物积累----
+```{r}
+model_value <- ode(func=TK, times=times,
+                 y=initial, parms= parameters)
+
+
+
+d_Cint <- as.data.frame(model_value)
+
+tail(d_Cint)
+names(d_Cint)
+```
+
+
+#201 2.00 0.465881941 0.485295554
+
+# 3.5 生物积累做图
+```{r}
+p2  <- ggplot(d_Cint, aes(time))+
+  theme_bw()+
+  geom_line(aes(y=Cint_113), color=cbb[1], size=0.9, alpha=0.8)+
+  geom_line(aes(y=Cint_114),color=cbb[2], size=0.9, alpha=0.8)+
+  geom_vline(xintercept=2, linetype="dashed", color="grey50")+
+  geom_point(aes(x=14, y=0.3258762), size=3)+
+  geom_point(aes(x=14, y=2.857943), size=3, color=cbb[2])+
+  geom_point(aes(x=2, y=0.465881941), size=3, shape=21, color=cbb[2])+
+  geom_point(aes(x=2, y=0.485295554), size=3, shape=21, color=cbb[1])+
+  geom_point(aes(x=0, y=0), size=3, shape=21, color=cbb[2])+
+  geom_point(aes(x=0, y=0), size=3, shape=21, color=cbb[1])+
+  scale_x_continuous(breaks=c(0, 2, 14), labels=c("T0","T1","T2"))+
+  scale_y_continuous(breaks=seq(0, 3, length=5), labels=c("0","","","",""))+
+  labs(x="Time of exposure",
+       y="Cd in organism")+
+  theme(axis.text.x = element_text(size=10, color="black"))+
+  theme(panel.grid = element_blank())+
+  annotate(geom="text", x=10, y=0.7, label=expression(""^113*"Cd"), size=4)+
+  annotate(geom="text", x=10, y=1.7, label=expression(""^114*"Cd"), size=4, color=cbb[2])
+
+
+p2
+```
+
+
+
+##################################################  
+# 4. 图输出----  
+```{r}
+png("experimental design v2.png", width=283/90*600, height=315/90*600, res=600)  
+plot_grid(p1,p2, 
+          ncol=1, 
+          rel_heights = c(0.7,1))  
+dev.off()
+```
+
